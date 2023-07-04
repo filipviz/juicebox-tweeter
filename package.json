@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "trial": "date -d '3 days ago' +%s > timestamp.txt && node index.js"
+    "trial": "date -d '8 days ago' +%s > timestamp.txt && node index.js"
   },
   "type": "module",
   "keywords": [],

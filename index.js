@@ -6,6 +6,7 @@ import session from "express-session";
 import crypto from "crypto";
 config();
 
+const emojis = ['😱', '🔥', '😻', '🥰', '💀', '🥵', '😲', '😈', '😽', '💋', '👅', '🎃', '🌚', '🍌', '🗿', '💣', '💞']
 const juicebox_subgraph = process.env.JUICEBOX_SUBGRAPH;
 console.log('Juicebox Twitter server initialized.')
 
@@ -41,12 +42,12 @@ async function resolveMetadata(metadataUri) {
   return fetch(`https://ipfs.io/ipfs/${metadataUri}`).then((res) => res.json());
 }
 
-async function resolveEns(address) {
+/*async function resolveEns(address) {
   const ens = await fetch(
     `https://api.ensideas.com/ens/resolve/${address}`
   ).then((res) => res.json());
   return ens.name ? ens.name : address;
-}
+}*/
 
 let authorized = false;
 async function main() {
@@ -59,18 +60,19 @@ async function main() {
       console.log(`Updating most recent timestamp to ${timestamp}`);
       fs.writeFileSync("timestamp.txt", timestamp.toString());
     }
-    const [metadata, from] = await Promise.all([
-      resolveMetadata(p.project.metadataUri),
-      resolveEns(p.from),
-    ]);
+    const metadata = await resolveMetadata(p.project.metadataUri)
     const project_name = metadata.name
       ? metadata.name
       : `v${p.pv} project ${p.projectId}`;
+    const url = `https://juicebox.money/${p.pv === "2" ? "v2/p/" + p.projectId : "p/" + p.project.handle}`
+    const emoji = emojis[Math.floor(Math.random() * emojis.length)]
+
+    // 280 max length. Emojis count for 2 chars each. URLs always count for 23 chars. 9 for ellipse + spacing.
+    const description_length = 280 - 4 - 23 - 9 - project_name.length
+    const description = metadata.description ? `\n\n${metadata.description.substring(0, description_length)}...` : ""
 
     const tweet = await client.tweets.createTweet({
-      text: `${project_name} launched by ${from}\n\nhttps://juicebox.money/${
-        p.pv === "2" ? "v2/p/" + p.projectId : "p/" + p.project.handle
-      }`,
+      text: `${emoji} ${project_name.toUpperCase()} ${emoji}${description}\n\n${url}`,
     });
     console.log("New tweet: " + JSON.stringify(tweet));
   }
@@ -91,7 +93,7 @@ app.use(
 const authClient = new auth.OAuth2User({
   client_id: process.env.CLIENT_ID,
   client_secret: process.env.CLIENT_SECRET,
-  callback: "http://localhost:3000/callback",
+  callback: `${process.env.MAIN_URL}/callback`,
   scopes: ["tweet.write", "tweet.read", "users.read"],
 });
 const client = new Client(authClient);
@@ -135,5 +137,5 @@ app.get("/revoke", async function (_, res) {
 });
 
 app.listen(3000, () => {
-  console.log(`Go here to login: http://localhost:3000/login`);
+  console.log(`Go here to login: ${process.env.MAIN_URL}/login`);
 });
