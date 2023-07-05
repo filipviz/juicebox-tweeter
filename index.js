@@ -6,9 +6,19 @@ import session from "express-session";
 import crypto from "crypto";
 config();
 
-const emojis = ['😱', '🔥', '😻', '🥰', '💀', '🥵', '😲', '😈', '😽', '💋', '👅', '🎃', '🌚', '🍌', '🗿', '💣', '💞']
+const emojis = [
+  "😱",
+  "🔥",
+  "😻",
+  "🥵",
+  "😲",
+  "🍌",
+  "🧃",
+  "💞",
+  "🎉",
+];
 const juicebox_subgraph = process.env.JUICEBOX_SUBGRAPH;
-console.log('Juicebox Twitter server initialized.')
+console.log("Juicebox Twitter server initialized.");
 
 if (!fs.existsSync("timestamp.txt")) {
   fs.writeFileSync("timestamp.txt", Math.floor(Date.now() / 1000).toString());
@@ -51,7 +61,10 @@ async function resolveMetadata(metadataUri) {
 
 let authorized = false;
 async function main() {
-  if(!authorized){ console.log("No authorized user. Skipping project check."); return; }
+  if (!authorized) {
+    console.log("No authorized user. Skipping project check.");
+    return;
+  }
   console.log("Checking for new projects");
   const json = await querySubgraph();
   for (const p of json.data.projectCreateEvents) {
@@ -60,19 +73,24 @@ async function main() {
       console.log(`Updating most recent timestamp to ${timestamp}`);
       fs.writeFileSync("timestamp.txt", timestamp.toString());
     }
-    const metadata = await resolveMetadata(p.project.metadataUri)
+    const metadata = await resolveMetadata(p.project.metadataUri);
     const project_name = metadata.name
       ? metadata.name
       : `v${p.pv} project ${p.projectId}`;
-    const url = `https://juicebox.money/${p.pv === "2" ? "v2/p/" + p.projectId : "p/" + p.project.handle}`
-    const emoji = emojis[Math.floor(Math.random() * emojis.length)]
+    const url = `https://juicebox.money/${
+      p.pv === "2" ? "v2/p/" + p.projectId : "p/" + p.project.handle
+    }`;
+    const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+    const tag = metadata.twitter ? `\nby @${metadata.twitter}` : "";
 
     // 280 max length. Emojis count for 2 chars each. URLs always count for 23 chars. 9 for ellipse + spacing.
-    const description_length = 280 - 4 - 23 - 9 - project_name.length
-    const description = metadata.description ? `\n\n${metadata.description.substring(0, description_length)}...` : ""
+    const description_length = 280 - 4 - 23 - 9 - project_name.length - tag.length;
+    const description = metadata.description
+      ? `\n\n${metadata.description.substring(0, description_length)}...`
+      : "";
 
     const tweet = await client.tweets.createTweet({
-      text: `${emoji} ${project_name.toUpperCase()} ${emoji}${description}\n\n${url}`,
+      text: `${emoji} ${project_name.toUpperCase()} ${emoji}${tag}${description}\n\n${url}`,
     });
     console.log("New tweet: " + JSON.stringify(tweet));
   }
@@ -98,6 +116,10 @@ const authClient = new auth.OAuth2User({
 });
 const client = new Client(authClient);
 
+app.get("/", async function (_, res) {
+  res.redirect("/login");
+});
+
 app.get("/callback", async function (req, res) {
   try {
     const { code, state } = req.query;
@@ -106,7 +128,7 @@ app.get("/callback", async function (req, res) {
     await authClient.requestAccessToken(code);
     authorized = true;
     console.log("Successfully authorized.");
-    res.send("Successfully authorized.")
+    res.send("Successfully authorized.");
   } catch (error) {
     console.log(error);
   }
@@ -114,7 +136,9 @@ app.get("/callback", async function (req, res) {
 
 app.get("/login", async function (req, res) {
   if (authorized) {
-    return res.send('Already authorized. Please <a href="/revoke">revoke</a> first.');
+    return res.send(
+      'Already authorized. Please <a href="/revoke">revoke</a> first.'
+    );
   }
   const state = crypto.randomBytes(20).toString("hex");
   req.session.oauth2state = state;
