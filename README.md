@@ -23,9 +23,3 @@ And run with:
 ```bash
 node .
 ```
-
-To run starting with a timestamp from 3 days ago:
-
-```bash
-npm run trial
-```

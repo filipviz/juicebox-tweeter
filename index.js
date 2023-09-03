@@ -95,7 +95,7 @@ async function main() {
 }
 
 // Check every 3 minutes.
-setInterval(main, 30 * 1000);
+setInterval(main, 300 * 1000);
 
 const app = express();
 app.use(
