@@ -1,63 +1,58 @@
+import { config } from "dotenv";
 import { Client, auth } from "twitter-api-sdk";
 import express from "express";
-import { config } from "dotenv";
 import fs from "fs";
 import session from "express-session";
 import crypto from "crypto";
+import { createPublicClient, http, parseAbiItem } from "viem";
+import { mainnet } from "viem/chains";
+import twitter from "twitter-text";
+import TurndownService from "turndown";
+
 config();
 
-const emojis = [
-  "😱",
-  "🔥",
-  "😻",
-  "🥵",
-  "😲",
-  "🍌",
-  "🧃",
-  "💞",
-  "🎉",
-];
-const juicebox_subgraph = process.env.JUICEBOX_SUBGRAPH;
-console.log("Juicebox Twitter server initialized.");
+BigInt.prototype.toJSON = function () {
+  return this.toString();
+};
+console.log("Juicebox Twitter server initializing.");
 
-if (!fs.existsSync("timestamp.txt")) {
-  fs.writeFileSync("timestamp.txt", Math.floor(Date.now() / 1000).toString());
-  console.log("Created new timestamp.txt");
-}
-let timestamp = fs.readFileSync("timestamp.txt");
+const publicClient = createPublicClient({
+  transport: http(),
+  chain: mainnet,
+});
 
-async function querySubgraph() {
-  return fetch(juicebox_subgraph, {
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-    body: JSON.stringify({
-      query: `{
-        projectCreateEvents(where:{timestamp_gt: ${timestamp}}){
-          project{
-            handle
-            metadataUri
-          }
-          from
-          projectId
-          txHash
-          pv
-          timestamp
-        }
-      }`,
-    }),
-  }).then((res) => res.json());
+const turndownService = new TurndownService();
+turndownService.addRule('removeImages', {
+  filter: ['img'],
+  replacement: () => ''
+})
+
+if (!fs.existsSync("fromBlock.txt")) {
+  const block = await publicClient.getBlock();
+  fs.writeFileSync("fromBlock.txt", block.number.toString());
+  console.log("Created new fromBlock.txt");
 }
+let fromBlock = BigInt(fs.readFileSync("fromBlock.txt"))
+
+const JBProjects = "0xD8B4359143eda5B2d763E127Ed27c77addBc47d3";
+const getNewProjects = () => {
+  console.log(`Fetching from ${fromBlock}`)
+  return publicClient.getLogs({
+    address: JBProjects,
+    event: parseAbiItem(
+      "event Create(uint256 indexed projectId, address indexed owner, (string content, uint256 domain) metadata, address caller)"
+    ),
+    fromBlock,
+  });
+}
+
+// await getNewProjects().then((p) =>
+//   p.forEach((g) => console.log(g))
+// );
 
 async function resolveMetadata(metadataUri) {
   return fetch(`https://ipfs.io/ipfs/${metadataUri}`).then((res) => res.json());
 }
-
-/*async function resolveEns(address) {
-  const ens = await fetch(
-    `https://api.ensideas.com/ens/resolve/${address}`
-  ).then((res) => res.json());
-  return ens.name ? ens.name : address;
-}*/
 
 let authorized = false;
 async function main() {
@@ -66,38 +61,41 @@ async function main() {
     return;
   }
   console.log("Checking for new projects");
-  const json = await querySubgraph();
-  for (const p of json.data.projectCreateEvents) {
-    if (p.timestamp > timestamp) {
-      timestamp = p.timestamp;
-      console.log(`Updating most recent timestamp to ${timestamp}`);
-      fs.writeFileSync("timestamp.txt", timestamp.toString());
+  const logs = await getNewProjects();
+
+  for (const l of logs) {
+    if (l.blockNumber >= fromBlock) {
+      fromBlock = l.blockNumber + 1n;
+      console.log(`Updating most recent creation block to ${fromBlock}`);
+      fs.writeFileSync("fromBlock.txt", fromBlock.toString());
     }
-    const metadata = await resolveMetadata(p.project.metadataUri);
+    const metadata = await resolveMetadata(l.args.metadata.content);
     const project_name = metadata.name
       ? metadata.name
-      : `v${p.pv} project ${p.projectId}`;
-    const url = `https://juicebox.money/${
-      p.pv === "2" ? "v2/p/" + p.projectId : "p/" + p.project.handle
-    }`;
-    const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+      : `Project ${l.args.projectId.toString()}`;
+    const url = `https://juicebox.money/v2/p/${l.args.projectId.toString()}`;
     const tag = metadata.twitter ? `\nby @${metadata.twitter}` : "";
 
-    // 280 max length. Emojis count for 2 chars each. URLs always count for 23 chars. 9 for ellipse + spacing.
-    const description_length = 280 - 4 - 23 - 9 - project_name.length - tag.length;
-    const description = metadata.description
-      ? `\n\n${metadata.description.substring(0, description_length)}...`
-      : "";
+    let constructedTweet = `New project: ${project_name}${tag}\nLink: ${url}`;
+
+    // 280 max tweet length
+    const description_length =
+      280 - twitter.parseTweet(constructedTweet).weightedLength;
+    if (metadata.description)
+      constructedTweet += "\n\n" + turndownService
+        .turndown(metadata.description)
+        .replace(/\n\s*/g, "\n")
+        .slice(0, description_length - 4) + "…"
 
     const tweet = await client.tweets.createTweet({
-      text: `${emoji} ${project_name.toUpperCase()} ${emoji}${tag}${description}\n\n${url}`,
-    });
+      text: constructedTweet,
+    }).catch(e => console.error(JSON.stringify(e)));
     console.log("New tweet: " + JSON.stringify(tweet));
   }
 }
 
 // Check every 3 minutes.
-setInterval(main, 180 * 1000);
+setInterval(main, 30 * 1000);
 
 const app = express();
 app.use(
